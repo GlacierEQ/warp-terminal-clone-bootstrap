@@ -808,44 +808,90 @@ create_wurp_functions() {
     # Copy our complete modular function library to the generated project
     local bootstrap_functions="$SCRIPT_DIR/lib/wurp-terminal-bootstrap-functions.sh"
     
-    if [ -f "$bootstrap_functions" ]; then
-        # Extract the template from our main functions file
-        print_status "info" "Copying complete modular system"
-        # We'll create the complete modular function library
-        # Copy our complete modular system to the generated project
-        cp "$SCRIPT_DIR/lib/wurp-terminal-bootstrap-functions.sh" "$filename"
-        
-        # Update paths and context for the generated project
-        sed -i 's|lib/wurp-terminal-bootstrap-functions.sh|lib/wurp-terminal-functions.sh|g' "$filename"
-        sed -i 's|# Modular coordinator for Wurp Terminal Bootstrap|# Modular function library for Wurp (Warp Terminal Clone)|g' "$filename"
-        sed -i 's|Bootstrap coordinator:|Generated project:|g' "$filename"
-        
-        print_status "success" "Complete modular system copied to generated project"
-    else
-        print_status "warning" "Bootstrap functions not found, creating simplified version"
-        # Create a simplified functions library as fallback
+    # Always create a clean, simplified version for generated projects
+    print_status "info" "Creating simplified function library for generated project"
         cat > "$filename" << 'SIMPLE_EOF'
 #!/bin/bash
 # lib/wurp-terminal-functions.sh
 # Modular function library for Wurp (Warp Terminal Clone)
 
-# Basic functions for generated project
+# Basic configuration function
 get_config() {
     local path=$1
     echo "$CONFIG" | jq -r "$path // empty" 2>/dev/null
 }
 
+# Expand path variables
+expand_path() {
+    local path=$1
+    # Handle $HOME expansion properly
+    path="${path/\$HOME/$HOME}"
+    # Handle ~ expansion
+    path="${path/#\~/$HOME}"
+    echo "$path"
+}
+
+# Print colored output
+print_color() {
+    local color_name=$1
+    local message=$2
+    case $color_name in
+        "red") echo -e "\033[0;31m${message}\033[0m" ;;
+        "green") echo -e "\033[0;32m${message}\033[0m" ;;
+        "yellow") echo -e "\033[1;33m${message}\033[0m" ;;
+        "blue") echo -e "\033[0;34m${message}\033[0m" ;;
+        "cyan") echo -e "\033[0;36m${message}\033[0m" ;;
+        *) echo "$message" ;;
+    esac
+}
+
+# Print status with emoji
 print_status() {
     local status=$1
     local message=$2
     case $status in
-        "success") echo -e "\033[0;32m✅ $message\033[0m" ;;
-        "error") echo -e "\033[0;31m❌ $message\033[0m" ;;
-        "warning") echo -e "\033[1;33m⚠️  $message\033[0m" ;;
-        "info") echo -e "\033[0;36mℹ️  $message\033[0m" ;;
-        "working") echo -e "\033[1;33m🔨 $message\033[0m" ;;
+        "success") print_color "green" "✅ $message" ;;
+        "error") print_color "red" "❌ $message" ;;
+        "warning") print_color "yellow" "⚠️  $message" ;;
+        "info") print_color "cyan" "ℹ️  $message" ;;
+        "working") print_color "yellow" "🔨 $message" ;;
+        "folder") print_color "blue" "📁 $message" ;;
+        "file") print_color "green" "📝 $message" ;;
+        "computer") print_color "cyan" "💻 $message" ;;
+        "gear") print_color "yellow" "⚙️ $message" ;;
+        "wrench") print_color "yellow" "🔧 $message" ;;
+        "book") print_color "blue" "📖 $message" ;;
+        "rocket") print_color "cyan" "🚀 $message" ;;
+        "party") print_color "green" "🎉 $message" ;;
+        "target") print_color "cyan" "🎯 $message" ;;
         *) echo "$message" ;;
     esac
+}
+
+# Simple binary search for generated projects
+get_simple_binary_paths() {
+    local binary_name="wurp-terminal"
+    local search_paths=(
+        "bin/Release/net9.0/linux-x64/publish/$binary_name"
+        "bin/Release/net9.0/publish/$binary_name"
+        "bin/Release/net9.0/linux-x64/$binary_name"
+        "bin/Release/net9.0/linux-x64/publish/$binary_name.dll"
+        "bin/Release/net9.0/publish/$binary_name.dll"
+    )
+    printf '%s\n' "${search_paths[@]}"
+}
+
+find_simple_binary() {
+    local search_paths
+    readarray -t search_paths < <(get_simple_binary_paths)
+    
+    for path in "${search_paths[@]}"; do
+        if [ -f "$PROJECT_ROOT/$path" ]; then
+            echo "$PROJECT_ROOT/$path"
+            return 0
+        fi
+    done
+    return 1
 }
 
 check_dependencies() {
@@ -866,22 +912,29 @@ publish_app() {
 }
 
 run_app() {
-    local binary_name="wurp-terminal"
-    for path in "bin/Release/net9.0/linux-x64/publish/$binary_name" "bin/Release/net9.0/publish/$binary_name.dll"; do
-        if [ -f "$PROJECT_ROOT/$path" ]; then
-            if [[ "$path" == *.dll ]]; then
-                exec dotnet "$PROJECT_ROOT/$path" "$@"
-            else
-                exec "$PROJECT_ROOT/$path" "$@"
-            fi
-        fi
-    done
-    print_status "error" "Application not found. Please build first."
+    local actual_binary
+    if ! actual_binary=$(find_simple_binary); then
+        print_status "error" "Application not found. Please build first."
+        return 1
+    fi
+    
+    if [[ "$actual_binary" == *.dll ]]; then
+        exec dotnet "$actual_binary" "$@"
+    else
+        exec "$actual_binary" "$@"
+    fi
 }
 
 show_status() {
     echo "🚀 Wurp Terminal Status"
-    [ -f "bin/Release/net9.0/linux-x64/publish/wurp-terminal" ] && print_status "success" "Application built" || print_status "error" "Application not built"
+    
+    local actual_binary
+    if actual_binary=$(find_simple_binary); then
+        local relative_path="${actual_binary#${PROJECT_ROOT:-}/}"
+        print_status "success" "Application built at: $relative_path"
+    else
+        print_status "error" "Application not built"
+    fi
 }
 
 show_help() {
@@ -889,7 +942,6 @@ show_help() {
     echo "Commands: build, publish, run, status, check, help"
 }
 SIMPLE_EOF
-    fi
 
     chmod +x "$filename"
 }
